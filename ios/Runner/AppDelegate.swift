@@ -372,11 +372,11 @@ extension AppDelegate: DeviceChangeObserver {
 extension AppDelegate: MetricsObserver {
     func metricsDidReceive(metrics: [AnyHashable: Any]) {
         // Extract available bitrate from Chime SDK metrics
-        if let availableSendBandwidth = metrics[ObservableMetric.availableSendBandwidth] as? Double {
-            let bitrateKbps = Int(availableSendBandwidth / 1000)
+        if let sendBw = metrics[ObservableMetric.videoAvailableSendBandwidth] as? Double, sendBw > 0 {
+            let bitrateKbps = Int(sendBw / 1000)
             sendEvent(type: "metricsReceived", data: ["bitrateKbps": bitrateKbps])
-        } else if let availableRecvBandwidth = metrics[ObservableMetric.availableReceiveBandwidth] as? Double {
-            let bitrateKbps = Int(availableRecvBandwidth / 1000)
+        } else if let recvBw = metrics[ObservableMetric.videoAvailableReceiveBandwidth] as? Double, recvBw > 0 {
+            let bitrateKbps = Int(recvBw / 1000)
             sendEvent(type: "metricsReceived", data: ["bitrateKbps": bitrateKbps])
         }
     }

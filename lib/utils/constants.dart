@@ -12,7 +12,7 @@ class Constants {
 
   /// Base URL for the shareable deep link page (GitHub Pages).
   /// Update this after enabling GitHub Pages on your repo.
-  static const String deepLinkBaseUrl = 'https://YOUR_GITHUB_USERNAME.github.io/hipster_meeting_test';
+  static const String deepLinkBaseUrl = 'https://anujtyagi53.github.io/hipster_meeting_test';
 
   static String formatTimestamp(DateTime dt) => DateFormat('HH:mm:ss.SSS').format(dt);
   static String formatDate(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm').format(dt);

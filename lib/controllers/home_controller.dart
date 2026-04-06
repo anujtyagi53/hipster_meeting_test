@@ -176,9 +176,7 @@ class HomeController extends GetxController {
       (data) {
         // Prefer API-returned meeting data with MediaPlacement over cached
         final apiMeeting = data.meeting;
-        final effectiveMeeting = (apiMeeting?.mediaPlacement != null)
-            ? apiMeeting
-            : meetingInfo ?? apiMeeting;
+        final effectiveMeeting = (apiMeeting?.mediaPlacement != null) ? apiMeeting : meetingInfo ?? apiMeeting;
 
         final mergedData = MeetingDataModel(
           meeting: effectiveMeeting,
@@ -186,8 +184,7 @@ class HomeController extends GetxController {
         );
         if (mergedData.meeting?.mediaPlacement == null) {
           AppLogger.error('No MediaPlacement available for meeting $meetingId', tag: 'HOME');
-          Get.snackbar('Error',
-              'Unable to get meeting connection data. Please try again.',
+          Get.snackbar('Error', 'Unable to get meeting connection data. Please try again.',
               backgroundColor: Colors.red.withValues(alpha: 0.8),
               colorText: Colors.white,
               snackPosition: SnackPosition.BOTTOM);

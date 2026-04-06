@@ -115,10 +115,11 @@
         const cell = params.get('c') || '';
         const region = params.get('r') || '';
 
-        // Build deep link
-        let deepLink = 'hipstermeet://join?meetingId=' + encodeURIComponent(meetingId);
+        // Build deep link using intent:// scheme for Android App Links
+        let deepLink = 'intent://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=' + encodeURIComponent(meetingId);
         if (cell) deepLink += '&c=' + encodeURIComponent(cell);
         if (region) deepLink += '&r=' + encodeURIComponent(region);
+        deepLink += '#Intent;scheme=https;package=com.hipster.hipster_meeting_test;end';
 
         // Build join code for manual entry
         let joinCode = meetingId;

@@ -54,16 +54,7 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>hipstermeet</string>
-			</array>
-			<key>CFBundleURLName</key>
-			<string>com.hipster.hipster-meeting-test</string>
-		</dict>
-	</array>
+	<key>FlutterDeepLinkingEnabled</key>
+	<true/>
 </dict>
 </plist>

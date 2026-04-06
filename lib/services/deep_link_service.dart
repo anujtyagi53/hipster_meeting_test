@@ -4,7 +4,7 @@ import 'package:hipster_meeting_test/routes/app_routes.dart';
 import 'package:hipster_meeting_test/utils/app_logger.dart';
 
 /// Handles deep links for joining meetings.
-/// Scheme: hipstermeet://join?meetingId=xxx&c=m3&r=as1
+/// HTTPS App Link: https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=xxx&c=m3&r=as1
 class DeepLinkService extends GetxService {
   static const _channel = MethodChannel('com.hipster.chime/deeplink');
 
@@ -36,19 +36,26 @@ class DeepLinkService extends GetxService {
     final uri = Uri.tryParse(link);
     if (uri == null) return;
 
-    if (uri.scheme == 'hipstermeet' && uri.host == 'join') {
-      final meetingId = uri.queryParameters['meetingId'];
-      if (meetingId != null && meetingId.isNotEmpty) {
-        final cell = uri.queryParameters['c'];   // e.g. "m3"
-        final region = uri.queryParameters['r']; // e.g. "as1"
+    String? meetingId;
+    String? cell;
+    String? region;
 
-        AppLogger.info('Joining meeting from deep link: $meetingId (cell=$cell, region=$region)', tag: 'DEEPLINK');
-        Get.toNamed(AppRoutes.home, arguments: {
-          'deepLinkMeetingId': meetingId,
-          if (cell != null) 'cell': cell,
-          if (region != null) 'regionCode': region,
-        });
-      }
+    if (uri.scheme == 'https' &&
+        uri.host == 'anujtyagi53.github.io' &&
+        uri.path.contains('/hipster_meeting_test/')) {
+      // HTTPS App Link: https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=xxx
+      meetingId = uri.queryParameters['meetingId'];
+      cell = uri.queryParameters['c'];
+      region = uri.queryParameters['r'];
+    }
+
+    if (meetingId != null && meetingId.isNotEmpty) {
+      AppLogger.info('Joining meeting from deep link: $meetingId (cell=$cell, region=$region)', tag: 'DEEPLINK');
+      Get.toNamed(AppRoutes.home, arguments: {
+        'deepLinkMeetingId': meetingId,
+        if (cell != null) 'cell': cell,
+        if (region != null) 'regionCode': region,
+      });
     }
   }
 }

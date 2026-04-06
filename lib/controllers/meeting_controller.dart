@@ -390,8 +390,8 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     return meetingId;
   }
 
-  /// Builds an HTTPS shareable link that opens a web page,
-  /// which then redirects to the app via hipstermeet:// deep link.
+  /// Builds an HTTPS shareable App Link that opens the app directly
+  /// or falls back to a web page for manual join.
   String _buildShareLink() {
     final fallbackUrl = meetingData.meeting?.mediaPlacement?.audioFallbackUrl ?? '';
     final cellMatch = RegExp(r'wss://wss\.k\.(\w+)\.(\w+)\.app\.chime\.aws').firstMatch(fallbackUrl);

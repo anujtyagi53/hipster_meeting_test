@@ -38,14 +38,14 @@ flutter build apk --release \
 - Min SDK: 24
 - Add Amazon Chime SDK AAR to `android/app/libs/`
 - Permissions pre-configured: CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_NETWORK_STATE, BLUETOOTH, WAKE_LOCK
-- Deep link scheme `hipstermeet://join?meetingId=xxx` registered
+- HTTPS App Link registered: `https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=xxx`
 
 ### 4. iOS Setup
 - Min iOS version: 13.0
 - Add Amazon Chime SDK via CocoaPods in `ios/Podfile`
 - Privacy permissions: camera ("This app needs camera access for video calls."), microphone ("This app needs microphone access for audio calls.")
 - Background modes: audio, voip
-- URL scheme `hipstermeet://` registered for deep linking
+- Associated Domains configured: `applinks:anujtyagi53.github.io` for Universal Links
 
 ### 5. Build & Run
 ```bash
@@ -62,10 +62,10 @@ flutter build ios --release --dart-define=API_KEY=YOUR_KEY --dart-define=ENV=pro
 ### 6. Deep Link Testing
 ```bash
 # Android
-adb shell am start -a android.intent.action.VIEW -d "hipstermeet://join?meetingId=YOUR_MEETING_ID"
+adb shell am start -a android.intent.action.VIEW -d "https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=YOUR_MEETING_ID"
 
 # iOS
-xcrun simctl openurl booted "hipstermeet://join?meetingId=YOUR_MEETING_ID"
+xcrun simctl openurl booted "https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=YOUR_MEETING_ID"
 ```
 
 ---
