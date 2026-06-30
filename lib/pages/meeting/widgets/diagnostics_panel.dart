@@ -37,16 +37,16 @@ class DiagnosticsPanel extends GetView<MeetingController> {
               ),
               const Divider(color: AppColors.divider, height: 16),
               _DiagRow(label: 'Connection', value: controller.callState.value.label,
-                  valueColor: _connectionColor()),
+                  valueColor: connectionColor()),
               _DiagRow(label: 'Network', value: controller.networkQuality.value,
                   valueColor: controller.networkQuality.value == 'Good'
                       ? AppColors.success : AppColors.warning),
-              _DiagRow(label: 'Reconnects', value: '${controller.reconnectAttempts.value}'),
+              _DiagRow(label: 'Reconnects', value: '${controller.reconnectCount.value}'),
               _DiagRow(label: 'Audio', value: controller.isMicEnabled.value ? 'Enabled' : 'Muted',
                   valueColor: controller.isMicEnabled.value ? AppColors.success : AppColors.error),
               _DiagRow(label: 'Video', value: controller.isCameraEnabled.value ? 'Enabled' : 'Disabled',
                   valueColor: controller.isCameraEnabled.value ? AppColors.success : AppColors.error),
-              _DiagRow(label: 'Bitrate', value: _bitrateLabel()),
+              _DiagRow(label: 'Bitrate', value: bitrateLabel()),
               _DiagRow(label: 'Duration', value: Get.find<ChimeService>().sessionDuration),
               _DiagRow(label: 'Camera', value: controller.isUsingFrontCamera.value ? 'Front' : 'Back'),
               _DiagRow(label: 'Remote', value: controller.remoteAttendeeId.value != null ? 'Connected' : 'None',
@@ -58,14 +58,14 @@ class DiagnosticsPanel extends GetView<MeetingController> {
     );
   }
 
-  String _bitrateLabel() {
+  String bitrateLabel() {
     final kbps = Get.find<ChimeService>().bitrateKbps.value;
     if (kbps == null) return 'N/A';
     if (kbps > 1000) return '${(kbps / 1000).toStringAsFixed(1)} Mbps';
     return '$kbps Kbps';
   }
 
-  Color _connectionColor() {
+  Color connectionColor() {
     switch (controller.callState.value) {
       case CallState.connected:
         return AppColors.success;

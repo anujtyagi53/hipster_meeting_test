@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import AVFoundation
 import AmazonChimeSDK
 
 @main
@@ -186,9 +187,17 @@ import AmazonChimeSDK
         meetingSession?.audioVideo.addRealtimeObserver(observer: self)
         meetingSession?.audioVideo.addDeviceChangeObserver(observer: self)
         meetingSession?.audioVideo.addMetricsObserver(observer: self)
+        meetingSession?.audioVideo.addActiveSpeakerObserver(policy: DefaultActiveSpeakerPolicy(), observer: self)
 
         try meetingSession?.audioVideo.start()
         meetingSession?.audioVideo.startRemoteVideo()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
     }
 
     private func stopMeeting() {
@@ -201,6 +210,9 @@ import AmazonChimeSDK
         meetingSession?.audioVideo.removeRealtimeObserver(observer: self)
         meetingSession?.audioVideo.removeDeviceChangeObserver(observer: self)
         meetingSession?.audioVideo.removeMetricsObserver(observer: self)
+        meetingSession?.audioVideo.removeActiveSpeakerObserver(observer: self)
+
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
 
         meetingSession = nil
         sendEvent(type: "meetingStopped", data: ["reason": "userLeft"])
@@ -217,17 +229,30 @@ import AmazonChimeSDK
     func setEventSink(_ sink: FlutterEventSink?) {
         self.eventSink = sink
     }
+
+    @objc private func handleAudioRouteChange(notification: Notification) {
+        guard meetingSession != nil else { return }
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+            .map { $0.portName }.joined(separator: ", ")
+        sendEvent(type: "audioRouteChanged", data: ["route": outputs.isEmpty ? "unknown" : outputs])
+    }
 }
 
 // ─── AudioVideoObserver ───
 
 extension AppDelegate: AudioVideoObserver {
-    func audioSessionDidStartConnecting(reconnecting: Bool) {}
+    func audioSessionDidStartConnecting(reconnecting: Bool) {
+        if reconnecting {
+            sendEvent(type: "reconnectAttempt", data: [:])
+        }
+    }
 
     func audioSessionDidStart(reconnecting: Bool) {
         do {
             sendEvent(type: "audioSessionStarted", data: ["reconnecting": reconnecting])
-            sendEvent(type: "meetingStarted", data: [:])
+            if !reconnecting {
+                sendEvent(type: "meetingStarted", data: [:])
+            }
         } catch { sendEvent(type: "error", data: ["message": "Callback error: \(error)"]) }
     }
 
@@ -380,6 +405,19 @@ extension AppDelegate: MetricsObserver {
             sendEvent(type: "metricsReceived", data: ["bitrateKbps": bitrateKbps])
         }
     }
+}
+
+// ─── ActiveSpeakerObserver ───
+
+extension AppDelegate: ActiveSpeakerObserver {
+    var observerId: String { return "AppDelegate.ActiveSpeaker" }
+
+    func activeSpeakerDidDetect(attendeeInfo: [AttendeeInfo]) {
+        guard let first = attendeeInfo.first else { return }
+        sendEvent(type: "activeSpeaker", data: ["attendeeId": first.attendeeId])
+    }
+
+    func activeSpeakerScoreDidChange(scores: [AttendeeInfo: Double]) {}
 }
 
 // ─── Event Stream Handler ───

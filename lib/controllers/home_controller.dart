@@ -14,25 +14,19 @@ class HomeController extends GetxController {
   final isLoading = false.obs;
   final selectedRole = 'agent'.obs;
 
-  /// Cache of full meeting data (with MediaPlacement) keyed by MeetingId.
-  /// The token retrieval APIs don't return MediaPlacement, so we cache it
-  /// from createMeeting and reuse it when joining/rejoining.
   static final Map<String, MeetingModel> _meetingCache = {};
 
-  /// Retrieve cached meeting data for a given meeting ID.
   static MeetingModel? getCachedMeeting(String meetingId) => _meetingCache[meetingId];
 
   @override
   void onInit() {
     super.onInit();
-    // Handle deep link: auto-fill meeting ID and cache MediaPlacement if provided
     final args = Get.arguments;
     if (args is Map && args['deepLinkMeetingId'] != null) {
       final id = args['deepLinkMeetingId'] as String;
       meetingIdController.text = id;
       selectedRole.value = 'client';
 
-      // If cell + region from deep link, construct exact MediaPlacement
       final cell = args['cell'] as String?;
       final regionCode = args['regionCode'] as String?;
       if (cell != null && regionCode != null) {
@@ -49,12 +43,10 @@ class HomeController extends GetxController {
         AppLogger.info('Constructed MediaPlacement from deep link (cell=$cell, region=$regionCode)', tag: 'HOME');
       }
 
-      // Auto-join after UI is built
       SchedulerBinding.instance.addPostFrameCallback((_) => joinMeeting());
     }
   }
 
-  /// Agent creates a new meeting
   Future<void> createMeeting() async {
     isLoading.value = true;
     EasyLoading.show(status: 'Creating meeting...');
@@ -95,7 +87,6 @@ class HomeController extends GetxController {
       return;
     }
 
-    // Parse join code format: "meetingId:cell:region" or plain "meetingId"
     String meetingId;
     String? cell;
     String? regionCode;
@@ -104,7 +95,7 @@ class HomeController extends GetxController {
       meetingId = parts[0];
       cell = parts[1];
       regionCode = parts[2];
-      meetingIdController.text = meetingId; // Show clean meeting ID
+      meetingIdController.text = meetingId;
     } else {
       meetingId = input;
     }
@@ -112,10 +103,8 @@ class HomeController extends GetxController {
     isLoading.value = true;
     EasyLoading.show(status: 'Joining meeting...');
 
-    // Check local cache first for MediaPlacement
     MeetingModel? meetingInfo = _meetingCache[meetingId];
 
-    // If cell+region provided (from join code), construct exact MediaPlacement
     if (meetingInfo == null && cell != null && regionCode != null) {
       final placement = MediaPlacement.fromCellAndRegion(
         meetingId: meetingId,
@@ -131,9 +120,6 @@ class HomeController extends GetxController {
       AppLogger.info('Constructed MediaPlacement from join code (cell=$cell, region=$regionCode)', tag: 'HOME');
     }
 
-    // If no cached MediaPlacement, create a temp meeting to discover the region's
-    // URL patterns, then construct MediaPlacement for the target meeting.
-    // The token retrieval API never returns MediaPlacement — only createMeeting does.
     if (meetingInfo == null || meetingInfo.mediaPlacement == null) {
       AppLogger.info('No cached MediaPlacement, creating temp meeting for URL template...', tag: 'HOME');
       final templateResult = await _repository.createMeeting();
@@ -157,7 +143,6 @@ class HomeController extends GetxController {
       );
     }
 
-    // Now get the caller's own attendee token
     final result = selectedRole.value == 'agent'
         ? await _repository.getAgentToken(meetingId)
         : await _repository.getClientToken(meetingId);
@@ -174,7 +159,6 @@ class HomeController extends GetxController {
             snackPosition: SnackPosition.BOTTOM);
       },
       (data) {
-        // Prefer API-returned meeting data with MediaPlacement over cached
         final apiMeeting = data.meeting;
         final effectiveMeeting = (apiMeeting?.mediaPlacement != null) ? apiMeeting : meetingInfo ?? apiMeeting;
 
@@ -190,7 +174,6 @@ class HomeController extends GetxController {
               snackPosition: SnackPosition.BOTTOM);
           return;
         }
-        // Cache for reconnect
         if (mergedData.meeting != null) {
           _meetingCache[meetingId] = mergedData.meeting!;
         }

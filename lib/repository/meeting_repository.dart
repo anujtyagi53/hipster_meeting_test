@@ -11,25 +11,22 @@ import 'package:hipster_meeting_test/utils/app_logger.dart';
 class MeetingRepository {
   final ApiClient _apiClient = Get.find<ApiClient>();
 
-  /// Creates a new meeting and returns agent's join token
   Future<Either<Failure, MeetingDataModel>> createMeeting() async {
     try {
-      // Send as both query params and JSON body for API compatibility
       final response = await _apiClient.postRequest(
         ApiEndpoints.meetingsApi,
         data: {'type': 'agent'},
         queryParameters: {'type': 'agent'},
       );
-      return _handleResponse(response);
+      return handleResponse(response);
     } on DioException catch (e) {
-      return Left(ServerFailure(message: _extractErrorMessage(e), errorResponse: e.response?.data));
+      return Left(ServerFailure(message: extractErrorMessage(e), errorResponse: e.response?.data));
     } catch (e) {
       AppLogger.error('createMeeting error', tag: 'REPO', error: e);
       return Left(UnknownFailure(message: e.toString()));
     }
   }
 
-  /// Gets client attendee token for an existing meeting
   Future<Either<Failure, MeetingDataModel>> getClientToken(String meetingId) async {
     try {
       final response = await _apiClient.postRequest(
@@ -37,10 +34,10 @@ class MeetingRepository {
         data: {'type': 'client', 'meeting_id': meetingId},
         queryParameters: {'type': 'client', 'meeting_id': meetingId},
       );
-      return _handleResponse(response);
+      return handleResponse(response);
     } on DioException catch (e) {
       return Left(ServerFailure(
-        message: _extractErrorMessage(e),
+        message: extractErrorMessage(e),
         errorResponse: e.response?.data,
       ));
     } catch (e) {
@@ -49,7 +46,6 @@ class MeetingRepository {
     }
   }
 
-  /// Gets agent attendee token for an existing meeting (rejoin)
   Future<Either<Failure, MeetingDataModel>> getAgentToken(String meetingId) async {
     try {
       final response = await _apiClient.postRequest(
@@ -57,10 +53,10 @@ class MeetingRepository {
         data: {'type': 'agent', 'meeting_id': meetingId},
         queryParameters: {'type': 'agent', 'meeting_id': meetingId},
       );
-      return _handleResponse(response);
+      return handleResponse(response);
     } on DioException catch (e) {
       return Left(ServerFailure(
-        message: _extractErrorMessage(e),
+        message: extractErrorMessage(e),
         errorResponse: e.response?.data,
       ));
     } catch (e) {
@@ -69,7 +65,7 @@ class MeetingRepository {
     }
   }
 
-  Either<Failure, MeetingDataModel> _handleResponse(Response response) {
+  Either<Failure, MeetingDataModel> handleResponse(Response response) {
     final data = response.data;
     if (data is Map<String, dynamic>) {
       final parsed = GenericResponse<MeetingDataModel>.fromJson(
@@ -81,17 +77,16 @@ class MeetingRepository {
         return Right(parsed.data!);
       }
 
-      // Server returned error status — extract user-friendly message
       final serverMsg = parsed.message ?? '';
       return Left(ServerFailure(
-        message: _parseServerError(serverMsg, response.statusCode),
+        message: parseServerError(serverMsg, response.statusCode),
         errorResponse: data,
       ));
     }
     return Left(ServerFailure(message: 'Unexpected response from server.'));
   }
 
-  String _parseServerError(String serverMsg, int? statusCode) {
+  String parseServerError(String serverMsg, int? statusCode) {
     if (serverMsg.contains('NotFoundException') || serverMsg.contains('not found')) {
       return 'Meeting not found or has expired. Please create a new meeting.';
     }
@@ -108,7 +103,6 @@ class MeetingRepository {
       return serverMsg;
     }
 
-    // Fallback based on status code
     switch (statusCode) {
       case 400:
         return 'Invalid request. Please check your input.';
@@ -126,15 +120,14 @@ class MeetingRepository {
     }
   }
 
-  String _extractErrorMessage(DioException e) {
+  String extractErrorMessage(DioException e) {
     final data = e.response?.data;
     final serverMsg = (data is Map) ? data['message'] as String? : null;
 
     if (serverMsg != null) {
-      return _parseServerError(serverMsg, e.response?.statusCode);
+      return parseServerError(serverMsg, e.response?.statusCode);
     }
 
-    // Handle connection errors
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
@@ -143,7 +136,7 @@ class MeetingRepository {
       case DioExceptionType.connectionError:
         return 'Unable to connect to the server. Please check your network.';
       default:
-        return _parseServerError('', e.response?.statusCode);
+        return parseServerError('', e.response?.statusCode);
     }
   }
 }

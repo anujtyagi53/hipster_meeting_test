@@ -1,11 +1,10 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hipster_meeting_test/services/chime_service.dart';
 
-/// Native platform view for rendering Chime video tiles.
-/// Uses AndroidView/UiKitView to embed native video surfaces.
 class ChimeVideoView extends StatefulWidget {
   final int tileId;
   final bool isMirror;

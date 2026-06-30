@@ -5,7 +5,6 @@ import 'package:hipster_meeting_test/enums/call_state.dart';
 import 'package:hipster_meeting_test/pages/meeting/widgets/control_bar.dart';
 import 'package:hipster_meeting_test/pages/meeting/widgets/diagnostics_panel.dart';
 import 'package:hipster_meeting_test/pages/meeting/widgets/event_log_panel.dart';
-import 'package:hipster_meeting_test/pages/meeting/widgets/reconnect_banner.dart';
 import 'package:hipster_meeting_test/pages/meeting/widgets/video_area.dart';
 import 'package:hipster_meeting_test/utils/app_colors.dart';
 import 'package:hipster_meeting_test/utils/app_styles.dart';
@@ -23,66 +22,81 @@ class MeetingPage extends GetView<MeetingController> {
         }
       },
       child: Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Obx(() {
-          final state = controller.callState.value;
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          child: Obx(() {
+            final state = controller.callState.value;
 
-          if (state == CallState.joining) {
-            return _buildJoiningView();
-          }
+            if (state == CallState.joining) {
+              return joiningView();
+            }
 
-          if (state == CallState.failed) {
-            return _buildFailedView();
-          }
+            if (state == CallState.failed) {
+              return failedView();
+            }
 
-          return Column(
-            children: [
-              // Reconnect banner
-              if (state == CallState.reconnecting) const ReconnectBanner(),
-
-              // Top bar with meeting info
-              _buildTopBar(),
-
-              // Main content area
-              Expanded(
-                child: Stack(
-                  children: [
-                    // Video area (remote + local preview)
-                    const VideoArea(),
-
-                    // Event log panel (slide up)
-                    if (controller.showEventLog.value)
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: MediaQuery.of(context).size.height * 0.4,
-                        child: const EventLogPanel(),
-                      ),
-
-                    // Diagnostics panel
-                    if (controller.showDiagnostics.value)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: const DiagnosticsPanel(),
-                      ),
-                  ],
+            return Column(
+              children: [
+                if (state == CallState.reconnecting) reconnectBanner(),
+                topBar(),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      const VideoArea(),
+                      if (controller.showEventLog.value)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: MediaQuery.of(context).size.height * 0.4,
+                          child: const EventLogPanel(),
+                        ),
+                      if (controller.showDiagnostics.value)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: const DiagnosticsPanel(),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-
-              // Control bar
-              const ControlBar(),
-            ],
-          );
-        }),
+                const ControlBar(),
+              ],
+            );
+          }),
+        ),
       ),
-    ),
     );
   }
 
-  Widget _buildTopBar() {
+  Widget reconnectBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: AppColors.reconnectBanner,
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Obx(() => Text(
+                  'Reconnecting... (attempt ${controller.reconnectCount.value})',
+                  style: kCaptionStyle(color: Colors.white),
+                )),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget topBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: AppColors.controlBarBg,
@@ -93,7 +107,7 @@ class MeetingPage extends GetView<MeetingController> {
                 height: 10,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _stateColor(controller.callState.value),
+                  color: stateColor(controller.callState.value),
                 ),
               )),
           const SizedBox(width: 8),
@@ -132,7 +146,7 @@ class MeetingPage extends GetView<MeetingController> {
     );
   }
 
-  Widget _buildJoiningView() {
+  Widget joiningView() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -147,7 +161,7 @@ class MeetingPage extends GetView<MeetingController> {
     );
   }
 
-  Widget _buildFailedView() {
+  Widget failedView() {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -194,7 +208,7 @@ class MeetingPage extends GetView<MeetingController> {
     );
   }
 
-  Color _stateColor(CallState state) {
+  Color stateColor(CallState state) {
     switch (state) {
       case CallState.connected:
         return AppColors.success;

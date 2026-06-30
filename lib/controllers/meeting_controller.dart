@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -49,7 +50,10 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
   Timer? _reconnectTimer;
   Timer? _staleSessionTimer;
   bool _isReconnecting = false;
-  int _reconnectCount = 0;
+  bool _joiningSession = false;
+  bool _rejoinInProgress = false;
+  bool _userLeftIntentionally = false;
+  final reconnectCount = 0.obs;
 
   StreamSubscription? _eventSubscription;
   StreamSubscription? _connectivitySubscription;
@@ -63,59 +67,73 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     meetingData = args['meetingData'] as MeetingDataModel;
     isAgent = args['isAgent'] as bool;
 
-    _subscribeToEvents();
-    _subscribeToConnectivity();
-    _startMeeting();
+    subscribeToEvents();
+    subscribeToConnectivity();
+    startMeeting();
   }
 
-  void _subscribeToEvents() {
+  void subscribeToEvents() {
     _eventSubscription = _chimeService.eventStream.listen((event) {
-      _addEvent(event);
-      _handleMeetingEvent(event);
+      addEvent(event);
+      handleMeetingEvent(event);
     });
   }
 
-  void _subscribeToConnectivity() {
+  void subscribeToConnectivity() {
     _connectivitySubscription = _connectivityService.isConnected.listen((connected) {
-      if (!connected && callState.value == CallState.connected) {
+      if (!connected && callState.value == CallState.connected && !_userLeftIntentionally) {
         callState.value = CallState.reconnecting;
-        _addEvent(MeetingEventModel(
+        addEvent(MeetingEventModel(
           type: MeetingEventType.networkDegraded,
           message: 'Network connection lost',
         ));
-        _startReconnect();
-      } else if (connected && callState.value == CallState.reconnecting) {
-        _attemptRejoin();
+        startReconnect();
+      } else if (connected && callState.value == CallState.reconnecting && !_userLeftIntentionally) {
+        _reconnectTimer?.cancel();
+        attemptRejoin();
       }
     });
   }
 
-  void _handleMeetingEvent(MeetingEventModel event) {
+  void handleMeetingEvent(MeetingEventModel event) {
     switch (event.type) {
       case MeetingEventType.meetingStarted:
+        if (_userLeftIntentionally) break;
+        _joiningSession = false;
         callState.value = CallState.connected;
-        _startStaleSessionTimer();
+        startStaleSessionTimer();
         break;
       case MeetingEventType.meetingStopped:
-        callState.value = CallState.disconnected;
+        if (_joiningSession) {
+          // Native stopMeeting() from startMeeting arrived async after the method returned.
+          // Consume the guard here so the deferred event doesn't tear down the new session.
+          _joiningSession = false;
+          break;
+        }
+        if (callState.value == CallState.failed)
+          break; // deferred cleanup after max-attempts; don't overwrite failure state
         _isReconnecting = false;
-        _reconnectCount = 0;
-        _cancelTimers();
+        callState.value = CallState.disconnected;
+        reconnectCount.value = 0;
+        cancelTimers();
         WakelockPlus.disable();
         break;
       case MeetingEventType.sessionFailure:
+        _isReconnecting = false;
+        _joiningSession = false;
         callState.value = CallState.failed;
         errorMessage.value = event.message;
-        _cancelTimers();
+        cancelTimers();
         WakelockPlus.disable();
         break;
       case MeetingEventType.reconnectAttempt:
-        callState.value = CallState.reconnecting;
+        if (!_userLeftIntentionally) callState.value = CallState.reconnecting;
         break;
       case MeetingEventType.connectionRecovered:
         callState.value = CallState.connected;
         _isReconnecting = false;
-        _reconnectCount = 0;
+        reconnectCount.value = 0;
+        cancelTimers();
         break;
       case MeetingEventType.attendeeJoined:
         // Show snackbar only for remote participant (message won't contain local attendee ID)
@@ -151,18 +169,17 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  void _addEvent(MeetingEventModel event) {
+  void addEvent(MeetingEventModel event) {
     events.insert(0, event);
     if (events.length > Constants.maxEventLogEntries) {
       events.removeLast();
     }
   }
 
-  // ─── Meeting Lifecycle ───
-
-  Future<void> _startMeeting() async {
+  Future<void> startMeeting() async {
+    _joiningSession = true;
     callState.value = CallState.joining;
-    _addEvent(MeetingEventModel(
+    addEvent(MeetingEventModel(
       type: MeetingEventType.info,
       message: 'Requesting permissions...',
     ));
@@ -172,13 +189,13 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     final camDenied = !(permissions['camera'] ?? false);
 
     if (micDenied) {
-      _addEvent(MeetingEventModel(
+      addEvent(MeetingEventModel(
         type: MeetingEventType.error,
         message: 'Microphone permission denied.',
       ));
     }
     if (camDenied) {
-      _addEvent(MeetingEventModel(
+      addEvent(MeetingEventModel(
         type: MeetingEventType.error,
         message: 'Camera permission denied.',
       ));
@@ -189,17 +206,16 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
       final micPerm = await _permissionService.isMicrophoneDeniedPermanently();
       final camPerm = await _permissionService.isCameraDeniedPermanently();
       if (micPerm || camPerm) {
-        await _showPermissionSettingsDialog(micPerm: micPerm, camPerm: camPerm);
-        // Re-check after returning from settings
+        await showPermissionSettingsDialog(micPerm: micPerm, camPerm: camPerm);
         final updated = await _permissionService.requestMeetingPermissions();
         if (!(updated['microphone'] ?? false)) {
-          _addEvent(MeetingEventModel(
+          addEvent(MeetingEventModel(
             type: MeetingEventType.error,
             message: 'Microphone still denied after settings. Audio will not work.',
           ));
         }
         if (!(updated['camera'] ?? false)) {
-          _addEvent(MeetingEventModel(
+          addEvent(MeetingEventModel(
             type: MeetingEventType.error,
             message: 'Camera still denied after settings. Video will not work.',
           ));
@@ -207,15 +223,16 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
       }
     }
 
-    _addEvent(MeetingEventModel(
+    addEvent(MeetingEventModel(
       type: MeetingEventType.info,
       message: 'Joining meeting: $meetingId as ${isAgent ? "agent" : "client"}',
     ));
 
     if (meetingData.meeting == null || meetingData.attendee == null) {
+      _joiningSession = false;
       callState.value = CallState.failed;
       errorMessage.value = 'Invalid meeting data received';
-      _addEvent(MeetingEventModel(
+      addEvent(MeetingEventModel(
         type: MeetingEventType.error,
         message: 'Meeting or attendee data is null',
       ));
@@ -228,7 +245,7 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
       if (callState.value == CallState.joining) {
         callState.value = CallState.failed;
         errorMessage.value = 'Join timed out after ${Constants.joinTimeout.inSeconds}s';
-        _addEvent(MeetingEventModel(
+        addEvent(MeetingEventModel(
           type: MeetingEventType.error,
           message: 'Join timeout exceeded',
         ));
@@ -241,11 +258,16 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     );
 
     joinTimer.cancel();
+    if (callState.value == CallState.failed) {
+      _joiningSession = false; // joinTimer fired before startMeeting returned
+      return;
+    }
 
     if (!success) {
+      _joiningSession = false;
       callState.value = CallState.failed;
       errorMessage.value = 'Failed to join meeting';
-      _addEvent(MeetingEventModel(
+      addEvent(MeetingEventModel(
         type: MeetingEventType.error,
         message: 'Failed to start meeting session',
       ));
@@ -255,7 +277,7 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     WakelockPlus.enable();
   }
 
-  Future<void> _showPermissionSettingsDialog({
+  Future<void> showPermissionSettingsDialog({
     required bool micPerm,
     required bool camPerm,
   }) async {
@@ -267,8 +289,7 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     final result = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('$label Permission Required',
-            style: const TextStyle(color: AppColors.white)),
+        title: Text('$label Permission Required', style: const TextStyle(color: AppColors.white)),
         content: Text(
           '$label access was permanently denied. '
           'Please enable it in Settings to use this feature.',
@@ -296,8 +317,8 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
   }
 
   void confirmLeave() {
-    if (callState.value == CallState.failed ||
-        callState.value == CallState.disconnected) {
+    if (_userLeftIntentionally) return;
+    if (callState.value == CallState.failed || callState.value == CallState.disconnected) {
       Get.back();
       return;
     }
@@ -327,23 +348,25 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<void> leaveMeeting() async {
-    _addEvent(MeetingEventModel(
+    _userLeftIntentionally = true;
+    _isReconnecting = false;
+    cancelTimers();
+    addEvent(MeetingEventModel(
       type: MeetingEventType.info,
       message: 'Leaving meeting...',
     ));
     await _chimeService.stopMeeting();
     callState.value = CallState.disconnected;
-    _cancelTimers();
     WakelockPlus.disable();
     Get.back();
   }
 
   void retryJoin() {
     errorMessage.value = null;
-    _startMeeting();
+    reconnectCount.value = 0;
+    _isReconnecting = false;
+    startMeeting();
   }
-
-  // ─── Controls ───
 
   void toggleMute() => _chimeService.toggleMute();
   void toggleCamera() => _chimeService.toggleCamera();
@@ -352,11 +375,8 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
   void toggleEventLog() => showEventLog.toggle();
   void toggleDiagnostics() => showDiagnostics.toggle();
 
-  /// Copies the meeting join code to clipboard.
-  /// Format: meetingId:cell:region (e.g. "abc-2954:m3:as1")
-  /// The joining device parses this to construct correct server URLs.
   void copyMeetingId() {
-    final joinCode = _buildJoinCode();
+    final joinCode = buildJoinCode();
     Clipboard.setData(ClipboardData(text: joinCode));
     Get.snackbar('Copied', 'Meeting join code copied to clipboard',
         snackPosition: SnackPosition.TOP,
@@ -366,8 +386,8 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
   }
 
   void shareMeeting() {
-    final joinCode = _buildJoinCode();
-    final shareLink = _buildShareLink();
+    final joinCode = buildJoinCode();
+    final shareLink = buildShareLink();
     SharePlus.instance.share(
       ShareParams(
         text: 'Join my Hipster Meeting!\n\n'
@@ -377,163 +397,166 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     );
   }
 
-  String _buildJoinCode() {
+  ({String? cell, String? region}) parseCellRegion() {
     final fallbackUrl = meetingData.meeting?.mediaPlacement?.audioFallbackUrl ?? '';
-    AppLogger.info('Building join code. AudioFallbackUrl: $fallbackUrl', tag: 'MEETING');
-    final cellMatch = RegExp(r'wss://wss\.k\.(\w+)\.(\w+)\.app\.chime\.aws').firstMatch(fallbackUrl);
-    if (cellMatch != null) {
-      final code = '$meetingId:${cellMatch.group(1)}:${cellMatch.group(2)}';
-      AppLogger.info('Join code: $code', tag: 'MEETING');
-      return code;
-    }
+    final m = RegExp(r'wss://wss\.k\.(\w+)\.(\w+)\.app\.chime\.aws').firstMatch(fallbackUrl);
+    return (cell: m?.group(1), region: m?.group(2));
+  }
+
+  String buildJoinCode() {
+    final (:cell, :region) = parseCellRegion();
+    if (cell != null && region != null) return '$meetingId:$cell:$region';
     AppLogger.warning('Could not extract cell/region from fallback URL', tag: 'MEETING');
     return meetingId;
   }
 
-  /// Builds an HTTPS shareable App Link that opens the app directly
-  /// or falls back to a web page for manual join.
-  String _buildShareLink() {
-    final fallbackUrl = meetingData.meeting?.mediaPlacement?.audioFallbackUrl ?? '';
-    final cellMatch = RegExp(r'wss://wss\.k\.(\w+)\.(\w+)\.app\.chime\.aws').firstMatch(fallbackUrl);
+  String buildShareLink() {
+    final (:cell, :region) = parseCellRegion();
     final base = Constants.deepLinkBaseUrl;
-    if (cellMatch != null) {
-      return '$base/join.html?meetingId=$meetingId&c=${cellMatch.group(1)}&r=${cellMatch.group(2)}';
-    }
+    if (cell != null && region != null) return '$base/join.html?meetingId=$meetingId&c=$cell&r=$region';
     return '$base/join.html?meetingId=$meetingId';
   }
 
   // ─── Reconnection Strategy ───
 
-  void _startReconnect() {
-    if (_isReconnecting) return; // Duplicate reconnect suppression
+  void startReconnect() {
+    if (_isReconnecting) return;
     _isReconnecting = true;
-    _reconnectCount = 0;
-    _scheduleReconnect();
+    reconnectCount.value = 0;
+    scheduleReconnect();
   }
 
-  void _scheduleReconnect() {
-    if (_reconnectCount >= Constants.reconnectMaxAttempts) {
+  void scheduleReconnect() {
+    if (!_isReconnecting) return;
+    if (reconnectCount.value >= Constants.reconnectMaxAttempts) {
       callState.value = CallState.failed;
       errorMessage.value = 'Failed to reconnect after ${Constants.reconnectMaxAttempts} attempts';
       _isReconnecting = false;
-      _addEvent(MeetingEventModel(
+      _joiningSession = false; // no new session will be started; don't swallow future meetingStopped
+      addEvent(MeetingEventModel(
         type: MeetingEventType.sessionFailure,
         message: 'Max reconnect attempts reached',
       ));
       return;
     }
 
-    // Exponential backoff: 2s, 4s, 8s, 16s, 32s
-    final delay = Constants.reconnectBaseDelay * (1 << _reconnectCount);
-    _reconnectCount++;
+    callState.value = CallState.reconnecting;
+    final delay = Constants.reconnectBaseDelay * (1 << reconnectCount.value);
+    reconnectCount.value++;
 
-    _addEvent(MeetingEventModel(
-      type: MeetingEventType.reconnectAttempt,
-      message: 'Reconnect attempt #$_reconnectCount in ${delay.inSeconds}s',
+    addEvent(MeetingEventModel(
+      type: MeetingEventType.info,
+      message: 'Scheduling reconnect #${reconnectCount.value} in ${delay.inSeconds}s',
     ));
 
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(delay, _attemptRejoin);
+    _reconnectTimer = Timer(delay, attemptRejoin);
   }
 
-  Future<void> _attemptRejoin() async {
-    if (!_connectivityService.isConnected.value) {
-      _scheduleReconnect();
-      return;
+  Future<void> attemptRejoin() async {
+    if (_rejoinInProgress) return;
+    _rejoinInProgress = true;
+    try {
+      if (!_connectivityService.isConnected.value) {
+        scheduleReconnect();
+        return;
+      }
+
+      addEvent(MeetingEventModel(
+        type: MeetingEventType.info,
+        message: 'Attempting to rejoin meeting...',
+      ));
+
+      final result = isAgent
+          ? await _meetingRepository.getAgentToken(meetingId)
+          : await _meetingRepository.getClientToken(meetingId);
+
+      await result.fold(
+        (failure) async {
+          AppLogger.error('Rejoin token fetch failed: ${failure.message}', tag: 'MEETING');
+          scheduleReconnect();
+        },
+        (data) async {
+          if (data.attendee == null) {
+            AppLogger.error('Rejoin got null attendee data', tag: 'MEETING');
+            scheduleReconnect();
+            return;
+          }
+          // Prefer API-returned meeting data if it has MediaPlacement,
+          // otherwise fall back to the original meeting data
+          final apiMeeting = data.meeting;
+          final mergedMeeting = (apiMeeting?.mediaPlacement != null) ? apiMeeting : meetingData.meeting ?? apiMeeting;
+          meetingData = MeetingDataModel(
+            meeting: mergedMeeting,
+            attendee: data.attendee,
+          );
+          if (mergedMeeting?.mediaPlacement == null) {
+            AppLogger.error('No MediaPlacement available for rejoin', tag: 'MEETING');
+            scheduleReconnect();
+            return;
+          }
+          _joiningSession = true;
+          final success = await _chimeService.startMeeting(
+            meeting: mergedMeeting!,
+            attendee: data.attendee!,
+          );
+          if (success && !_userLeftIntentionally) {
+            _isReconnecting = false;
+            reconnectCount.value = 0;
+            callState.value = CallState.connected;
+            addEvent(MeetingEventModel(
+              type: MeetingEventType.connectionRecovered,
+              message: 'Successfully rejoined meeting',
+            ));
+          } else if (!success) {
+            scheduleReconnect();
+          }
+        },
+      );
+    } finally {
+      _rejoinInProgress = false;
     }
-
-    _addEvent(MeetingEventModel(
-      type: MeetingEventType.info,
-      message: 'Attempting to rejoin meeting...',
-    ));
-
-    // Get fresh token
-    final result = isAgent
-        ? await _meetingRepository.getAgentToken(meetingId)
-        : await _meetingRepository.getClientToken(meetingId);
-
-    result.fold(
-      (failure) {
-        AppLogger.error('Rejoin token fetch failed: ${failure.message}', tag: 'MEETING');
-        _scheduleReconnect();
-      },
-      (data) async {
-        if (data.attendee == null) {
-          AppLogger.error('Rejoin got null attendee data', tag: 'MEETING');
-          _scheduleReconnect();
-          return;
-        }
-        // Prefer API-returned meeting data if it has MediaPlacement,
-        // otherwise fall back to the original meeting data
-        final apiMeeting = data.meeting;
-        final mergedMeeting = (apiMeeting?.mediaPlacement != null)
-            ? apiMeeting
-            : meetingData.meeting ?? apiMeeting;
-        meetingData = MeetingDataModel(
-          meeting: mergedMeeting,
-          attendee: data.attendee,
-        );
-        if (mergedMeeting?.mediaPlacement == null) {
-          AppLogger.error('No MediaPlacement available for rejoin', tag: 'MEETING');
-          _scheduleReconnect();
-          return;
-        }
-        final success = await _chimeService.startMeeting(
-          meeting: mergedMeeting!,
-          attendee: data.attendee!,
-        );
-        if (success) {
-          _isReconnecting = false;
-          _reconnectCount = 0;
-          callState.value = CallState.connected;
-          _addEvent(MeetingEventModel(
-            type: MeetingEventType.connectionRecovered,
-            message: 'Successfully rejoined meeting',
-          ));
-        } else {
-          _scheduleReconnect();
-        }
-      },
-    );
   }
 
   // ─── Stale Session Detection ───
 
-  void _startStaleSessionTimer() {
+  void startStaleSessionTimer() {
     _staleSessionTimer?.cancel();
     _staleSessionTimer = Timer(Constants.sessionStaleTimeout, () {
-      _addEvent(MeetingEventModel(
+      addEvent(MeetingEventModel(
         type: MeetingEventType.info,
         message: 'Session may be stale. Consider refreshing.',
       ));
     });
   }
 
-  // ─── App Lifecycle ───
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.paused:
-        _addEvent(MeetingEventModel(
+        addEvent(MeetingEventModel(
           type: MeetingEventType.info,
           message: 'App moved to background',
         ));
         AppLogger.info('App backgrounded', tag: 'LIFECYCLE');
         break;
       case AppLifecycleState.resumed:
-        _addEvent(MeetingEventModel(
+        addEvent(MeetingEventModel(
           type: MeetingEventType.info,
           message: 'App returned to foreground',
         ));
         AppLogger.info('App foregrounded', tag: 'LIFECYCLE');
-        if (callState.value == CallState.reconnecting ||
-            callState.value == CallState.disconnected) {
+        if (_userLeftIntentionally) break;
+        if (callState.value == CallState.reconnecting) {
+          _reconnectTimer?.cancel();
+          if (!_isReconnecting) {
+            _isReconnecting = true;
+            reconnectCount.value = 0;
+          }
           callState.value = CallState.reconnecting;
-          _attemptRejoin();
+          attemptRejoin();
         } else if (callState.value == CallState.failed) {
-          // Allow user to retry from failed state after returning from background
-          _addEvent(MeetingEventModel(
+          addEvent(MeetingEventModel(
             type: MeetingEventType.info,
             message: 'Meeting failed. Tap retry to reconnect.',
           ));
@@ -544,19 +567,21 @@ class MeetingController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  // ─── Cleanup ───
-
-  void _cancelTimers() {
+  void cancelTimers() {
     _reconnectTimer?.cancel();
     _staleSessionTimer?.cancel();
   }
 
   @override
   void onClose() {
+    _isReconnecting = false;
+    _joiningSession = false;
+    _rejoinInProgress = false;
+    _userLeftIntentionally = false;
     WidgetsBinding.instance.removeObserver(this);
     _eventSubscription?.cancel();
     _connectivitySubscription?.cancel();
-    _cancelTimers();
+    cancelTimers();
     _chimeService.stopMeeting();
     WakelockPlus.disable();
     super.onClose();

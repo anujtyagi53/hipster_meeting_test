@@ -18,7 +18,6 @@ class EventLogPanel extends GetView<MeetingController> {
       ),
       child: Column(
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: const BoxDecoration(
@@ -42,8 +41,6 @@ class EventLogPanel extends GetView<MeetingController> {
               ],
             ),
           ),
-
-          // Event list
           Expanded(
             child: Obx(() {
               if (controller.events.isEmpty) {

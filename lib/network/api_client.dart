@@ -22,7 +22,7 @@ class ApiClient {
     );
 
     if (kDebugMode) {
-      _dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: true));
+      _dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: true, requestHeader: false));
     }
     _dio.interceptors.add(_ErrorInterceptor());
   }

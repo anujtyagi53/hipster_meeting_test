@@ -6,7 +6,8 @@ import com.amazonaws.services.chime.sdk.meetings.audiovideo.video.VideoTileObser
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.video.VideoTileState
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.metric.MetricsObserver
 import com.amazonaws.services.chime.sdk.meetings.audiovideo.metric.ObservableMetric
-
+import com.amazonaws.services.chime.sdk.meetings.audiovideo.audio.activespeakerdetector.ActiveSpeakerObserver
+import com.amazonaws.services.chime.sdk.meetings.audiovideo.audio.activespeakerpolicy.DefaultActiveSpeakerPolicy
 import com.amazonaws.services.chime.sdk.meetings.device.DeviceChangeObserver
 import com.amazonaws.services.chime.sdk.meetings.device.MediaDevice
 import com.amazonaws.services.chime.sdk.meetings.realtime.RealtimeObserver
@@ -22,7 +23,8 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity(),
-    AudioVideoObserver, VideoTileObserver, RealtimeObserver, DeviceChangeObserver, MetricsObserver {
+    AudioVideoObserver, VideoTileObserver, RealtimeObserver, DeviceChangeObserver, MetricsObserver,
+    ActiveSpeakerObserver {
 
     private val METHOD_CHANNEL = "com.hipster.chime/meeting"
     private val EVENT_CHANNEL = "com.hipster.chime/events"
@@ -37,7 +39,6 @@ class MainActivity : FlutterActivity(),
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Capture deep link from launch intent
         pendingDeepLink = intent?.data?.toString()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
@@ -61,10 +62,12 @@ class MainActivity : FlutterActivity(),
                             result.error("START_FAILED", e.message, null)
                         }
                     }
+
                     "stopMeeting" -> {
                         stopMeeting()
                         result.success(true)
                     }
+
                     "setMute" -> {
                         val muted = call.argument<Boolean>("muted") ?: false
                         if (muted) {
@@ -75,6 +78,7 @@ class MainActivity : FlutterActivity(),
                         sendEvent(if (muted) "localMute" else "localUnmute", mapOf<String, Any>())
                         result.success(true)
                     }
+
                     "startLocalVideo" -> {
                         try {
                             meetingSession?.audioVideo?.startLocalVideo()
@@ -83,14 +87,17 @@ class MainActivity : FlutterActivity(),
                             result.error("VIDEO_FAILED", e.message, null)
                         }
                     }
+
                     "stopLocalVideo" -> {
                         meetingSession?.audioVideo?.stopLocalVideo()
                         result.success(true)
                     }
+
                     "switchCamera" -> {
                         meetingSession?.audioVideo?.switchCamera()
                         result.success(true)
                     }
+
                     "bindVideoView" -> {
                         val tileId = call.argument<Int>("tileId")
                         if (tileId != null) {
@@ -103,6 +110,7 @@ class MainActivity : FlutterActivity(),
                         }
                         result.success(true)
                     }
+
                     "unbindVideoView" -> {
                         val tileId = call.argument<Int>("tileId")
                         if (tileId != null) {
@@ -111,6 +119,7 @@ class MainActivity : FlutterActivity(),
                         }
                         result.success(true)
                     }
+
                     else -> result.notImplemented()
                 }
             }
@@ -120,19 +129,21 @@ class MainActivity : FlutterActivity(),
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
                 }
+
                 override fun onCancel(arguments: Any?) {
                     eventSink = null
                 }
             })
 
-        // Deep link channel
-        val deepLinkChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEEPLINK_CHANNEL)
+        val deepLinkChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEEPLINK_CHANNEL)
         deepLinkChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getInitialLink" -> {
                     result.success(pendingDeepLink)
                     pendingDeepLink = null
                 }
+
                 else -> result.notImplemented()
             }
         }
@@ -157,7 +168,6 @@ class MainActivity : FlutterActivity(),
         super.onDestroy()
     }
 
-    // ─── Chime SDK Initialization ───
 
     private fun startMeeting(meetingMap: Map<String, Any>, attendeeMap: Map<String, Any>) {
         val mediaPlacementMap = meetingMap["MediaPlacement"] as? Map<*, *>
@@ -195,6 +205,10 @@ class MainActivity : FlutterActivity(),
         meetingSession?.audioVideo?.addRealtimeObserver(this)
         meetingSession?.audioVideo?.addDeviceChangeObserver(this)
         meetingSession?.audioVideo?.addMetricsObserver(this)
+        meetingSession?.audioVideo?.addActiveSpeakerObserver(
+            DefaultActiveSpeakerPolicy(),
+            this
+        )
 
         meetingSession?.audioVideo?.start()
         meetingSession?.audioVideo?.startRemoteVideo()
@@ -210,47 +224,71 @@ class MainActivity : FlutterActivity(),
         meetingSession?.audioVideo?.removeRealtimeObserver(this)
         meetingSession?.audioVideo?.removeDeviceChangeObserver(this)
         meetingSession?.audioVideo?.removeMetricsObserver(this)
+        meetingSession?.audioVideo?.removeActiveSpeakerObserver(this)
 
         meetingSession = null
         sendEvent("meetingStopped", mapOf("reason" to "userLeft"))
     }
 
-    // ─── AudioVideoObserver ───
-
-    override fun onAudioSessionStartedConnecting(reconnecting: Boolean) {}
+    override fun onAudioSessionStartedConnecting(reconnecting: Boolean) {
+        if (reconnecting) {
+            try {
+                sendEvent("reconnectAttempt", mapOf<String, Any>())
+            } catch (e: Exception) {
+                sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+            }
+        }
+    }
 
     override fun onAudioSessionStarted(reconnecting: Boolean) {
         try {
             sendEvent("audioSessionStarted", mapOf("reconnecting" to reconnecting))
-            sendEvent("meetingStarted", mapOf<String, Any>())
+            if (!reconnecting) {
+                sendEvent("meetingStarted", mapOf<String, Any>())
+            }
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
         }
     }
 
     override fun onAudioSessionDropped() {
-        try { sendEvent("networkDegraded", mapOf<String, Any>()) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("networkDegraded", mapOf<String, Any>())
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onAudioSessionStopped(sessionStatus: MeetingSessionStatus) {
-        try { sendEvent("audioSessionStopped", mapOf<String, Any>()) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("audioSessionStopped", mapOf<String, Any>())
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onAudioSessionCancelledReconnect() {
-        try { sendEvent("sessionFailure", mapOf("error" to "Reconnection cancelled")) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("sessionFailure", mapOf("error" to "Reconnection cancelled"))
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onConnectionBecamePoor() {
-        try { sendEvent("networkDegraded", mapOf<String, Any>()) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("networkDegraded", mapOf<String, Any>())
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onConnectionRecovered() {
-        try { sendEvent("connectionRecovered", mapOf<String, Any>()) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("connectionRecovered", mapOf<String, Any>())
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onVideoSessionStartedConnecting() {}
@@ -265,16 +303,17 @@ class MainActivity : FlutterActivity(),
 
     override fun onCameraSendAvailabilityUpdated(available: Boolean) {}
 
-    // ─── VideoTileObserver ───
 
     override fun onVideoTileAdded(tileState: VideoTileState) {
         try {
-            sendEvent("videoTileAdded", mapOf(
-                "tileId" to tileState.tileId,
-                "isLocal" to tileState.isLocalTile,
-                "attendeeId" to (tileState.attendeeId ?: ""),
-                "pauseState" to tileState.pauseState.name
-            ))
+            sendEvent(
+                "videoTileAdded", mapOf(
+                    "tileId" to tileState.tileId,
+                    "isLocal" to tileState.isLocalTile,
+                    "attendeeId" to (tileState.attendeeId ?: ""),
+                    "pauseState" to tileState.pauseState.name
+                )
+            )
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
         }
@@ -282,36 +321,45 @@ class MainActivity : FlutterActivity(),
 
     override fun onVideoTileRemoved(tileState: VideoTileState) {
         try {
-            sendEvent("videoTileRemoved", mapOf(
-                "tileId" to tileState.tileId,
-                "isLocal" to tileState.isLocalTile
-            ))
+            sendEvent(
+                "videoTileRemoved", mapOf(
+                    "tileId" to tileState.tileId,
+                    "isLocal" to tileState.isLocalTile
+                )
+            )
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
         }
     }
 
     override fun onVideoTilePaused(tileState: VideoTileState) {
-        try { sendEvent("videoTilePaused", mapOf("tileId" to tileState.tileId)) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("videoTilePaused", mapOf("tileId" to tileState.tileId))
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onVideoTileResumed(tileState: VideoTileState) {
-        try { sendEvent("videoTileResumed", mapOf("tileId" to tileState.tileId)) }
-        catch (e: Exception) { sendEvent("error", mapOf("message" to "Callback error: ${e.message}")) }
+        try {
+            sendEvent("videoTileResumed", mapOf("tileId" to tileState.tileId))
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
     }
 
     override fun onVideoTileSizeChanged(tileState: VideoTileState) {}
 
-    // ─── RealtimeObserver ───
 
     override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) {
         try {
             for (info in attendeeInfo) {
-                sendEvent("attendeeJoined", mapOf(
-                    "attendeeId" to info.attendeeId,
-                    "externalUserId" to info.externalUserId
-                ))
+                sendEvent(
+                    "attendeeJoined", mapOf(
+                        "attendeeId" to info.attendeeId,
+                        "externalUserId" to info.externalUserId
+                    )
+                )
             }
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
@@ -321,10 +369,12 @@ class MainActivity : FlutterActivity(),
     override fun onAttendeesLeft(attendeeInfo: Array<AttendeeInfo>) {
         try {
             for (info in attendeeInfo) {
-                sendEvent("attendeeLeft", mapOf(
-                    "attendeeId" to info.attendeeId,
-                    "externalUserId" to info.externalUserId
-                ))
+                sendEvent(
+                    "attendeeLeft", mapOf(
+                        "attendeeId" to info.attendeeId,
+                        "externalUserId" to info.externalUserId
+                    )
+                )
             }
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
@@ -334,10 +384,12 @@ class MainActivity : FlutterActivity(),
     override fun onAttendeesDropped(attendeeInfo: Array<AttendeeInfo>) {
         try {
             for (info in attendeeInfo) {
-                sendEvent("attendeeLeft", mapOf(
-                    "attendeeId" to info.attendeeId,
-                    "externalUserId" to info.externalUserId
-                ))
+                sendEvent(
+                    "attendeeLeft", mapOf(
+                        "attendeeId" to info.attendeeId,
+                        "externalUserId" to info.externalUserId
+                    )
+                )
             }
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
@@ -367,10 +419,12 @@ class MainActivity : FlutterActivity(),
     override fun onVolumeChanged(volumeUpdates: Array<VolumeUpdate>) {
         try {
             for (update in volumeUpdates) {
-                sendEvent("volumeChanged", mapOf(
-                    "attendeeId" to update.attendeeInfo.attendeeId,
-                    "volume" to update.volumeLevel.name
-                ))
+                sendEvent(
+                    "volumeChanged", mapOf(
+                        "attendeeId" to update.attendeeInfo.attendeeId,
+                        "volume" to update.volumeLevel.name
+                    )
+                )
             }
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
@@ -379,19 +433,29 @@ class MainActivity : FlutterActivity(),
 
     override fun onSignalStrengthChanged(signalUpdates: Array<SignalUpdate>) {}
 
-    // ─── DeviceChangeObserver ───
 
     override fun onAudioDeviceChanged(freshAudioDeviceList: List<MediaDevice>) {
         try {
-            sendEvent("deviceChanged", mapOf(
-                "device" to (freshAudioDeviceList.firstOrNull()?.label ?: "unknown")
-            ))
+            val device = freshAudioDeviceList.firstOrNull()?.label ?: "unknown"
+            sendEvent("deviceChanged", mapOf("device" to device))
         } catch (e: Exception) {
             sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
         }
     }
 
-    // ─── MetricsObserver ───
+    override val scoreCallbackIntervalMs: Int? = null
+
+    override fun onActiveSpeakerDetected(attendeeInfo: Array<AttendeeInfo>) {
+        try {
+            val attendeeId = attendeeInfo.firstOrNull()?.attendeeId ?: return
+            sendEvent("activeSpeaker", mapOf("attendeeId" to attendeeId))
+        } catch (e: Exception) {
+            sendEvent("error", mapOf("message" to "Callback error: ${e.message}"))
+        }
+    }
+
+    override fun onActiveSpeakerScoreChanged(scores: Map<AttendeeInfo, Double>) {}
+
 
     override fun onMetricsReceived(metrics: Map<ObservableMetric, Any>) {
         try {
@@ -406,8 +470,6 @@ class MainActivity : FlutterActivity(),
             // Silently ignore metrics errors to avoid flooding event log
         }
     }
-
-    // ─── Event Emission ───
 
     private fun sendEvent(type: String, data: Map<String, Any>) {
         runOnUiThread {

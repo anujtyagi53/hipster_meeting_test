@@ -3,35 +3,31 @@ import 'package:get/get.dart';
 import 'package:hipster_meeting_test/routes/app_routes.dart';
 import 'package:hipster_meeting_test/utils/app_logger.dart';
 
-/// Handles deep links for joining meetings.
-/// HTTPS App Link: https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=xxx&c=m3&r=as1
 class DeepLinkService extends GetxService {
   static const _channel = MethodChannel('com.hipster.chime/deeplink');
 
   @override
   void onInit() {
     super.onInit();
-    _handleInitialLink();
-    _channel.setMethodCallHandler(_onMethodCall);
+    handleInitialLink();
+    _channel.setMethodCallHandler(onMethodCall);
   }
 
-  Future<void> _handleInitialLink() async {
+  Future<void> handleInitialLink() async {
     try {
       final link = await _channel.invokeMethod<String>('getInitialLink');
-      if (link != null) _processLink(link);
-    } catch (_) {
-      // No initial link
-    }
+      if (link != null) processLink(link);
+    } catch (_) {}
   }
 
-  Future<dynamic> _onMethodCall(MethodCall call) async {
+  Future<dynamic> onMethodCall(MethodCall call) async {
     if (call.method == 'onDeepLink') {
       final link = call.arguments as String?;
-      if (link != null) _processLink(link);
+      if (link != null) processLink(link);
     }
   }
 
-  void _processLink(String link) {
+  void processLink(String link) {
     AppLogger.info('Deep link received: $link', tag: 'DEEPLINK');
     final uri = Uri.tryParse(link);
     if (uri == null) return;
@@ -43,7 +39,6 @@ class DeepLinkService extends GetxService {
     if (uri.scheme == 'https' &&
         uri.host == 'anujtyagi53.github.io' &&
         uri.path.contains('/hipster_meeting_test/')) {
-      // HTTPS App Link: https://anujtyagi53.github.io/hipster_meeting_test/join.html?meetingId=xxx
       meetingId = uri.queryParameters['meetingId'];
       cell = uri.queryParameters['c'];
       region = uri.queryParameters['r'];

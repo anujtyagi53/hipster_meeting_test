@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:hipster_meeting_test/controllers/meeting_controller.dart';
+import 'package:hipster_meeting_test/pages/meeting/widgets/chime_video_view.dart';
 import 'package:hipster_meeting_test/utils/app_colors.dart';
 import 'package:hipster_meeting_test/utils/app_styles.dart';
-import 'package:hipster_meeting_test/pages/meeting/widgets/chime_video_view.dart';
 
 class VideoArea extends GetView<MeetingController> {
   const VideoArea({super.key});
@@ -12,7 +12,6 @@ class VideoArea extends GetView<MeetingController> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Remote video (full screen)
         Positioned.fill(
           child: Obx(() {
             final remoteTileId = controller.remoteVideoTileId.value;
@@ -24,12 +23,8 @@ class VideoArea extends GetView<MeetingController> {
               );
             }
             return _buildPlaceholder(
-              icon: remoteAttendee != null
-                  ? Icons.videocam_off
-                  : Icons.person_outline,
-              label: remoteAttendee != null
-                  ? 'Participant joined - Camera off'
-                  : 'Waiting for participant...',
+              icon: remoteAttendee != null ? Icons.videocam_off : Icons.person_outline,
+              label: remoteAttendee != null ? 'Participant joined - Camera off' : 'Waiting for participant...',
             );
           }),
         ),
